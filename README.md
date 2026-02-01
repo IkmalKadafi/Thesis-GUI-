@@ -1,4 +1,4 @@
-# Menu 1: Import Data & Exploration
+# Poverty Depth Index Spatial Analysis
 
 Aplikasi web berbasis Streamlit untuk eksplorasi dan visualisasi data regional Jawa Tengah dengan choropleth map interaktif.
 

@@ -10,8 +10,8 @@ PROJECT_ROOT = BASE_DIR.parent
 # Data directories
 DATA_DIR = BASE_DIR / "data"
 UPLOAD_DIR = DATA_DIR / "uploads"
-SAMPLE_DIR = DATA_DIR / "sample"
 GEOJSON_DIR = DATA_DIR / "geojson"
+MODEL_DIR = PROJECT_ROOT / "Model"
 
 # Geodata directories
 GEODATA_DIR = PROJECT_ROOT / "Geodata Jawa Tengah"
@@ -20,7 +20,6 @@ JAWA_TENGAH_GEOJSON_CACHE = GEOJSON_DIR / "jawa_tengah.geojson"
 
 # Create directories if they don't exist
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-SAMPLE_DIR.mkdir(parents=True, exist_ok=True)
 GEOJSON_DIR.mkdir(parents=True, exist_ok=True)
 
 # File upload settings
