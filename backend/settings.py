@@ -4,7 +4,11 @@ Configuration settings for the application
 from pathlib import Path
 
 # Base directory
-BASE_DIR = Path(__file__).resolve().parent.parent
+# Adjusted for new location: backend/settings.py (inside backend/)
+# file is at backend/settings.py
+# parent is backend/
+# parent.parent is root/
+BASE_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = BASE_DIR.parent
 
 # Data directories

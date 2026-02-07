@@ -12,9 +12,7 @@ from pathlib import Path
 backend_path = Path(__file__).parent / "backend"
 sys.path.insert(0, str(backend_path))
 
-from services.data_service import data_service
-from services.stats_service import stats_service
-from services.model_service import model_service
+from backend.services import data_service, stats_service, model_service, geo_service
 import folium
 from branca.colormap import LinearColormap
 import streamlit.components.v1 as components
@@ -52,19 +50,83 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Header
-st.markdown('<div class="main-header">📊 Poverty Depth Index Spatial Analysis</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-header">Sistem Analitik Spasial</div>', unsafe_allow_html=True)
+# st.markdown('<div class="main-header">📊 Poverty Depth Index Spatial Analysis</div>', unsafe_allow_html=True) # Moved to Home
+# st.markdown('<div class="sub-header">Sistem Analitik Spasial</div>', unsafe_allow_html=True) # Moved to Home
+
+from streamlit_option_menu import option_menu
 
 # Sidebar Menu
 with st.sidebar:
-    st.title("Menu Navigasi")
-    page = st.radio("Pilih Halaman", ["Import & Exploration", "Prediction"])
+    # st.image("https://img.icons8.com/clouds/100/000000/statistics.png", width=80) 
+    
+    # Custom Menu
+    page = option_menu(
+        menu_title="Menu Navigasi",  # Required
+        options=["Homepage", "Import & Exploration", "Prediction"],  # Required
+        icons=["house", "cloud-upload", "graph-up-arrow"],  # Optional
+        menu_icon="cast",  # Optional
+        default_index=0,  # Optional
+        styles={
+            "container": {"padding": "0!important", "background-color": "#262730"},
+            "icon": {"color": "orange", "font-size": "18px"}, 
+            "nav-link": {"font-size": "16px", "text-align": "left", "margin":"0px", "--hover-color": "#eee"},
+            "nav-link-selected": {"background-color": "#1f77b4"},
+        }
+    )
+    
     st.divider()
+    st.caption("© 2026 • Poverty Depth Index Spatial Analysis")
 
-# ==========================================
+# PAGE: HOMEPAGE (BERANDA)
+if page == "Homepage":
+    # Hero Section
+    st.markdown('<div class="main-header">📊 Poverty Depth Index Spatial Analysis</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-header">Sistem Analitik Spasial untuk Provinsi Jawa Tengah</div>', unsafe_allow_html=True)
+    
+    st.divider()
+    
+    # Grid Layout for Options
+    col_home_1, col_home_2 = st.columns(2)
+    
+    with col_home_1:
+        st.info("### 📂 Langkah 1: Import Data")
+        st.write("""
+        Mulailah dengan mengupload data Indeks Kedalaman Kemiskinan.
+        
+        **Fitur:**
+        - Upload file CSV/Excel.
+        - Eksplorasi Data Tabular.
+        - Statistik Deskriptif Otomatis.
+        - Visualisasi Awal (Peta & Grafik).
+        """)
+    
+    with col_home_2:
+        st.success("### 🔮 Langkah 2: Prediksi")
+        st.write("""
+        Lakukan prediksi menggunakan model Machine Learning yang telah dilatih.
+        
+        **Model Tersedia:**
+        - Global Logistic Regression.
+        - Geographically Weighted Logistic Regression (GWLR).
+        - MGWLR Semiparametric.
+        """)
+
+    st.write("")
+    st.write("")
+    
+    # About Section
+    with st.expander("ℹ️ Tentang Aplikasi Ini", expanded=True):
+        st.write("""
+        Aplikasi ini dikembangkan untuk mempermudah analisis spasial terkait kemiskinan di Jawa Tengah.
+        Menggabungkan analisis statistik deskriptif dan pemodelan prediktif spasial untuk memberikan wawasan yang lebih mendalam.
+        
+        **Dikembangkan oleh:** Ikmal Thariq Kadafi
+        """)
+
 # PAGE 1: IMPORT & EXPLORATION
-# ==========================================
-if page == "Import & Exploration":
+elif page == "Import & Exploration":
+    st.markdown('<div class="main-header">📂 Import & Eksplorasi Data</div>', unsafe_allow_html=True)
+    
     with st.sidebar:
         st.header("📁 Import Data")
         uploaded_file = st.file_uploader(
@@ -266,9 +328,9 @@ if page == "Import & Exploration":
         # Welcome message
         st.info("👆 Silakan upload file CSV atau Excel di menu sidebar untuk memulai.")
 
-# ==========================================
+
 # PAGE 2: PREDICTION
-# ==========================================
+
 elif page == "Prediction":
     st.title("🔮 Prediksi Model")
     
@@ -338,9 +400,8 @@ elif page == "Prediction":
                     # but we can't easily inject the new column into the service without reloading.
                     # So we use the helper logic here.
                     
-                    from services.geo_service import geo_service
-                    
-                    # Create Choropleth Data
+                    # from services.geo_service import geo_service
+                    # geo_service is already imported at top level from backend.services
                     # Assuming we have a region column. Let's try to detect it from the previous load.
                     region_col = data_service.region_column
                     
@@ -468,9 +529,15 @@ elif page == "Prediction":
                         metrics = model_service.calculate_metrics(y_true, y_pred)
                         
                         # Display Metrics as Table
-                        metrics_df = pd.DataFrame([metrics])
-                        # Round values
-                        metrics_df = metrics_df.round(4)
+                        # Match user request: Model, Accuracy, Precision, Recall, F1-Score
+                        metrics_df = pd.DataFrame([{
+                            'Model': selected_model,
+                            'Accuracy': metrics['Accuracy'],
+                            'Precision': metrics['Precision'],
+                            'Recall': metrics['Recall'],
+                            'F1-Score': metrics['F1-Score']
+                        }]).round(4)
+                        
                         st.dataframe(metrics_df, hide_index=True, use_container_width=True)
                             
                     except Exception as e:
