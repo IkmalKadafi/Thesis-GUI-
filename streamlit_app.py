@@ -67,10 +67,10 @@ with st.sidebar:
         menu_icon="cast",  # Optional
         default_index=0,  # Optional
         styles={
-            "container": {"padding": "0!important", "background-color": "#262730"},
-            "icon": {"color": "orange", "font-size": "18px"}, 
-            "nav-link": {"font-size": "16px", "text-align": "left", "margin":"0px", "--hover-color": "#eee"},
-            "nav-link-selected": {"background-color": "#1f77b4"},
+            "container": {"padding": "0!important", "background-color": "#f0f2f6"},
+            "icon": {"color": "#ff8c00", "font-size": "18px"}, 
+            "nav-link": {"font-size": "16px", "text-align": "left", "margin":"0px", "color": "#262730", "--hover-color": "#d0d2d6"},
+            "nav-link-selected": {"background-color": "#1f77b4", "color": "#ffffff"},
         }
     )
     
@@ -388,7 +388,7 @@ elif page == "Prediction":
             
             # 1. Map p1_predicted
             with col_res_map:
-                st.markdown("### 🗺️ Peta Sebaran Pred_Class_Logit (Kelas Prediksi)")
+                st.markdown("### 🗺️ Peta Sebaran Kelas Prediksi")
                 
                 try:
                     # Add prediction results to dataframe for mapping
@@ -459,7 +459,7 @@ elif page == "Prediction":
                         st.write("")
                         st.write("")
                         st.write("")
-                        st.markdown("### 🗺️ Peta Sebaran Pred_Prob_Logit (Probabilitas)")
+                        st.markdown("### 🗺️ Peta Sebaran Probabilitas")
                         
                         df_viz['Pred_Prob_Logit'] = probs
                         choropleth_data_prob = geo_service.create_choropleth_data(

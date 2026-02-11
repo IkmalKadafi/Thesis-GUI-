@@ -11,6 +11,7 @@ import statsmodels.api as sm
 from typing import Dict, Any, List, Optional, Tuple
 from pathlib import Path
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from sklearn.preprocessing import StandardScaler
 
 # Unified Imports
 from backend.settings import (
@@ -57,7 +58,7 @@ class GeoService:
             if self.geodataframe.crs is not None and self.geodataframe.crs.to_epsg() != 4326:
                 self.geodataframe = self.geodataframe.to_crs(epsg=4326)
             
-            print(f"✓ Loaded {len(self.geodataframe)} regions from Jawa Tengah shapefile")
+            print(f"[OK] Loaded {len(self.geodataframe)} regions from Jawa Tengah shapefile")
             
             return self.geodataframe
             
@@ -74,7 +75,7 @@ class GeoService:
             try:
                 with open(JAWA_TENGAH_GEOJSON_CACHE, 'r', encoding='utf-8') as f:
                     self.geojson_data = json.load(f)
-                print(f"✓ Loaded cached GeoJSON from {JAWA_TENGAH_GEOJSON_CACHE.name}")
+                print(f"[OK] Loaded cached GeoJSON from {JAWA_TENGAH_GEOJSON_CACHE.name}")
                 
                 # Build region mapping
                 self._build_region_mapping()
@@ -94,7 +95,7 @@ class GeoService:
             GEOJSON_DIR.mkdir(parents=True, exist_ok=True)
             with open(JAWA_TENGAH_GEOJSON_CACHE, 'w', encoding='utf-8') as f:
                 json.dump(self.geojson_data, f, ensure_ascii=False, indent=2)
-            print(f"✓ Cached GeoJSON to {JAWA_TENGAH_GEOJSON_CACHE.name}")
+            print(f"[OK] Cached GeoJSON to {JAWA_TENGAH_GEOJSON_CACHE.name}")
         except Exception as e:
             print(f"Warning: Could not cache GeoJSON: {e}")
         
@@ -255,10 +256,412 @@ class ModelService:
             with open(model_path, 'rb') as f:
                 model = pickle.load(f)
                 self.models[filename] = model
-                print(f"✓ Loaded model: {filename}")
+                print(f"[OK] Loaded model: {filename}")
                 return model
         except Exception as e:
             raise RuntimeError(f"Error loading model {filename}: {e}")
+    
+    def _predict_gwlr(self, model_data: Dict, df: pd.DataFrame) -> Tuple[pd.Series, pd.Series]:
+        """
+        Predict using GWLR model with local parameters
+        
+        Args:
+            model_data: Dictionary containing GWLR model components
+                - params: Local parameters (n x k+1) array
+                - scaler: StandardScaler object
+                - predictor: List of predictor column names
+                - bandwidth: Optimal bandwidth
+                - target: Target column name
+            df: DataFrame with input data
+            
+        Returns:
+            Tuple of (predictions, probabilities)
+        """
+        # Extract model components
+        # Handle both model structures:
+        # 1. Original user's code: {'results': GWR_results_object, ...}
+        # 2. Converted model: {'params': numpy_array, ...}
+        if 'results' in model_data:
+            # Original structure from user's code
+            results = model_data['results']
+            params = results.params  # Extract params from results object
+        elif 'params' in model_data:
+            # Converted structure
+            params = model_data['params']
+        else:
+            raise ValueError("Model must have either 'results' or 'params' key")
+            
+        scaler = model_data['scaler']  # StandardScaler
+        predictor_cols = model_data['predictor']  # List of predictor column names
+        
+        # Preprocessing: Create required columns if they don't exist
+        df_processed = df.copy()
+        
+        # CRITICAL: Check if all predictor columns already exist
+        # If yes, SKIP preprocessing to avoid corrupting correct data
+        all_cols_exist = all(col in df_processed.columns for col in predictor_cols)
+        
+        print(f"[GWLR DEBUG] Predictor columns needed: {predictor_cols}")
+        print(f"[GWLR DEBUG] All columns exist: {all_cols_exist}")
+        print(f"[GWLR DEBUG] Available columns: {list(df_processed.columns)}")
+        
+        if all_cols_exist:
+            print(f"[GWLR DEBUG] All predictor columns already exist, skipping preprocessing")
+        else:
+            print(f"[GWLR DEBUG] Some predictor columns missing, applying preprocessing...")
+            
+            # Column mapping and creation (only if needed)
+            # DepRatio: Dependency Ratio
+            if 'DepRatio' not in df_processed.columns:
+                if 'Jumlah Penduduk' in df_processed.columns:
+                    df_processed['DepRatio'] = 50.0  # Placeholder value
+                else:
+                    df_processed['DepRatio'] = 50.0 # Force placeholder
+                    print("[GWLR DEBUG] Warning: 'DepRatio' missing, using placeholder 50.0")
+            
+            # Industri: Industrial data
+            if 'Industri' not in df_processed.columns:
+                if 'PDRB ' in df_processed.columns:
+                    df_processed['Industri'] = df_processed['PDRB '].astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False).astype(float)
+                else:
+                    print("[GWLR DEBUG] Error: 'Industri' (PDRB) not found")
+            
+            # RumahLayak: Decent housing
+            if 'RumahLayak' not in df_processed.columns:
+                if 'Sanitasi Layak' in df_processed.columns:
+                    df_processed['RumahLayak'] = df_processed['Sanitasi Layak'].astype(str).str.replace(',', '.', regex=False).astype(float)
+                else:
+                    print("[GWLR DEBUG] Error: 'RumahLayak' not found")
+            
+            # Sanitasi: Sanitation
+            if 'Sanitasi' not in df_processed.columns:
+                if 'Sanitasi Layak' in df_processed.columns:
+                    df_processed['Sanitasi'] = df_processed['Sanitasi Layak'].astype(str).str.replace(',', '.', regex=False).astype(float)
+                else:
+                    print("[GWLR DEBUG] Error: 'Sanitasi' not found")
+            
+            # TPT: Tingkat Pengangguran Terbuka
+            if 'TPT' not in df_processed.columns:
+                if 'Tingkat Pengangguran Terbuka (TPT)' in df_processed.columns:
+                    df_processed['TPT'] = df_processed['Tingkat Pengangguran Terbuka (TPT)'].astype(str).str.replace(',', '.').astype(float)
+                else:
+                    print("[GWLR DEBUG] Error: 'TPT' not found")
+            
+            # UMK: Upah Minimum Kabupaten/Kota
+            if 'UMK' not in df_processed.columns:
+                if 'Upah Minimum Kabupaten/Kota (UMK)' in df_processed.columns:
+                    df_processed['UMK'] = df_processed['Upah Minimum Kabupaten/Kota (UMK)'].astype(str).str.replace('.', '').str.replace(',', '.').astype(float)
+                else:
+                    print("[GWLR DEBUG] Error: 'UMK' not found")
+        
+        # CRITICAL: Prepare for re-indexing
+        # df_processed needs to track the original index so we can return predictions in correct order
+        df_processed = df_processed.copy()
+        df_processed['_original_index'] = df.index
+        
+        # CRITICAL: Merge with shapefile and sort by ORDER
+        # This ensures data order matches training data order
+        # User's original code does this merge and sort before training
+        print(f"[GWLR DEBUG] Starting shapefile merge...")
+        try:
+            import geopandas as gpd
+            from pathlib import Path
+            
+            shapefile_path = Path(__file__).parent.parent / "Geodata Jawa Tengah" / "JawaTengah.shp"
+            print(f"[GWLR DEBUG] Shapefile path: {shapefile_path}")
+            print(f"[GWLR DEBUG] Shapefile exists: {shapefile_path.exists()}")
+            
+            if shapefile_path.exists():
+                # Load shapefile
+                gdf = gpd.read_file(shapefile_path)
+                gdf['ORDER'] = gdf.index
+                print(f"[GWLR DEBUG] Loaded shapefile with {len(gdf)} regions")
+                
+                # Determine which column to use for merging
+                # Try 'Kabupaten/Kota' first, then 'NAMOBJ'
+                merge_col = None
+                if 'Kabupaten/Kota' in df_processed.columns:
+                    merge_col = 'Kabupaten/Kota'
+                elif 'NAMOBJ' in df_processed.columns:
+                    merge_col = 'NAMOBJ'
+                else:
+                    # If neither exists, skip merge and hope data is already sorted
+                    print("Warning: No merge column found, using data as-is")
+                    df_final = df_processed
+                
+                if merge_col:
+                    print(f"[GWLR DEBUG] Merging on column: {merge_col}")
+                    # Merge with shapefile
+                    df_final = gdf.merge(df_processed, left_on="NAMOBJ", right_on=merge_col, how='inner')
+                    print(f"[GWLR DEBUG] After merge: {len(df_final)} rows")
+                    
+                    # Sort by ORDER (critical for GWLR!)
+                    df_final = df_final.sort_values("ORDER").reset_index(drop=True)
+                    print(f"[GWLR DEBUG] After sort: {len(df_final)} rows")
+                    print(f"[GWLR DEBUG] First 5 kabupaten: {df_final['Kabupaten/Kota'].head().tolist()}")
+                    
+                    print(f"[GWLR DEBUG] Merged with shapefile and sorted by ORDER")
+                else:
+                    df_final = df_processed
+            else:
+                print(f"Warning: Shapefile not found at {shapefile_path}, using data as-is")
+                df_final = df_processed
+                
+        except Exception as e:
+            print(f"Warning: Could not merge with shapefile: {e}")
+            print("Using data as-is without shapefile sorting")
+            df_final = df_processed
+        
+        # Prepare data (use df_final which is sorted correctly)
+        X = df_final[predictor_cols].values
+        n = len(X)
+        
+        # Validate number of observations matches model
+        if n != params.shape[0]:
+            print(f"[GWLR DEBUG] FATAL ERROR: Observation count mismatch. Data: {n}, Model: {params.shape[0]}")
+            raise ValueError(
+                f"Number of observations ({n}) does not match model training size ({params.shape[0]}). "
+                f"GWLR requires the same observations in the same order as training data."
+            )
+        
+        # Standardize features using the scaler from training (BEST PRACTICE)
+        # The scaler was fitted during model training and saved in the pickle
+        # This ensures consistency: same mean and std used for both training and prediction
+        X_scaled = scaler.transform(X)
+        
+        # Calculate eta (linear predictor) for each observation using local parameters
+        # eta_i = β0_i + X_scaled_i @ β_i[1:]
+        eta_gwlr = np.zeros(n)
+        
+        for i in range(n):
+            beta_i = params[i]  # Local parameters for observation i: [β0_i, β1_i, ..., βk_i]
+            eta_gwlr[i] = beta_i[0] + X_scaled[i] @ beta_i[1:]
+        
+        # Convert eta to probabilities using logistic function
+        # p = 1 / (1 + exp(-eta))
+        prob_values = 1 / (1 + np.exp(-eta_gwlr))
+        
+        # Classify using threshold 0.5
+        predictions = (prob_values >= 0.5).astype(int)
+        
+        # CRITICAL: Reorder predictions to match original dataframe index
+        # Currently predictions correspond to df_final rows (sorted by ORDER)
+        # We need to map them back to df.index using _original_index
+        if '_original_index' in df_final.columns:
+            print("[GWLR DEBUG] Reordering predictions to match original index")
+            
+            # Create series with original index as the index
+            pred_series = pd.Series(predictions, index=df_final['_original_index'])
+            prob_series = pd.Series(prob_values, index=df_final['_original_index'])
+            
+            # Sort by index to match df.index order (assuming df.index is sorted or we reindex)
+            pred_series = pred_series.reindex(df.index)
+            prob_series = prob_series.reindex(df.index)
+            
+            return pred_series, prob_series
+        else:
+            print("[GWLR DEBUG] Warning: Original index lost, returning as-is (may be scrambled)")
+            return pd.Series(predictions, index=df.index), pd.Series(prob_values, index=df.index)
+
+    def _predict_mgwlr(self, model_data: Dict, df: pd.DataFrame) -> Tuple[pd.Series, pd.Series]:
+        """
+        Predict using MGWLR (Mixed Geographically Weighted Logistic Regression) model
+        
+        MGWLR combines:
+        - Global variables (Z): Fixed effects across all locations
+        - Local variables (X): Spatially varying effects
+        
+        Args:
+            model_data: Dictionary containing MGWLR model components
+                - X_local: List of local variable names
+                - Z_global: List of global variable names
+                - Beta_Local: Local parameters (n x k_local) array
+                - res_global: Global GLM results with params
+                - Bandwidth_optimal: Optimal bandwidth
+                - (optional) scaler_X, scaler_Z, coordinates
+            df: DataFrame with input data
+            
+        Returns:
+            Tuple of (predictions, probabilities)
+        """
+        print("[MGWLR DEBUG] Starting MGWLR prediction")
+        
+        # Extract model components
+        X_local_cols = model_data.get('X_local', ['DepRatio', 'RumahLayak', 'Sanitasi'])
+        Z_global_cols = model_data.get('Z_global', ['UMK', 'Industri', 'TPT'])
+        Beta_Local = model_data['Beta_Local']  # (n, k_local) array
+        res_global = model_data['res_global']
+        gamma = res_global.params  # Global coefficients [intercept, γ_Z1, γ_Z2, ...]
+        
+        print(f"[MGWLR DEBUG] X_local (local vars): {X_local_cols}")
+        print(f"[MGWLR DEBUG] Z_global (global vars): {Z_global_cols}")
+        print(f"[MGWLR DEBUG] Beta_Local shape: {Beta_Local.shape}")
+        print(f"[MGWLR DEBUG] Gamma (global params) shape: {gamma.shape}")
+        
+        # Preprocessing: Create required columns if they don't exist
+        df_processed = df.copy()
+        
+        # Check if all columns already exist
+        all_cols = X_local_cols + Z_global_cols
+        all_cols_exist = all(col in df_processed.columns for col in all_cols)
+        
+        print(f"[MGWLR DEBUG] All columns exist: {all_cols_exist}")
+        print(f"[MGWLR DEBUG] Available columns: {list(df_processed.columns)}")
+        
+        if not all_cols_exist:
+            print(f"[MGWLR DEBUG] Applying preprocessing...")
+            
+            # Same preprocessing as GWLR
+            if 'DepRatio' not in df_processed.columns:
+                df_processed['DepRatio'] = 50.0
+                print("[MGWLR DEBUG] Added DepRatio placeholder")
+            
+            if 'Industri' not in df_processed.columns and 'PDRB ' in df_processed.columns:
+                df_processed['Industri'] = df_processed['PDRB '].astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False).astype(float)
+            
+            if 'RumahLayak' not in df_processed.columns and 'Sanitasi Layak' in df_processed.columns:
+                df_processed['RumahLayak'] = df_processed['Sanitasi Layak'].astype(str).str.replace(',', '.', regex=False).astype(float)
+            
+            if 'Sanitasi' not in df_processed.columns and 'Sanitasi Layak' in df_processed.columns:
+                df_processed['Sanitasi'] = df_processed['Sanitasi Layak'].astype(str).str.replace(',', '.', regex=False).astype(float)
+            
+            if 'TPT' not in df_processed.columns and 'Tingkat Pengangguran Terbuka (TPT)' in df_processed.columns:
+                df_processed['TPT'] = df_processed['Tingkat Pengangguran Terbuka (TPT)'].astype(str).str.replace(',', '.').astype(float)
+            
+            if 'UMK' not in df_processed.columns and 'Upah Minimum Kabupaten/Kota (UMK)' in df_processed.columns:
+                df_processed['UMK'] = df_processed['Upah Minimum Kabupaten/Kota (UMK)'].astype(str).str.replace('.', '').str.replace(',', '.').astype(float)
+        
+        # CRITICAL: Prepare for re-indexing
+        df_processed = df_processed.copy()
+        df_processed['_original_index'] = df.index
+        
+        # CRITICAL: Merge with shapefile and sort by ORDER
+        print(f"[MGWLR DEBUG] Starting shapefile merge...")
+        try:
+            import geopandas as gpd
+            from pathlib import Path
+            
+            shapefile_path = Path(__file__).parent.parent / "Geodata Jawa Tengah" / "JawaTengah.shp"
+            print(f"[MGWLR DEBUG] Shapefile path: {shapefile_path}")
+            print(f"[MGWLR DEBUG] Shapefile exists: {shapefile_path.exists()}")
+            
+            if shapefile_path.exists():
+                gdf = gpd.read_file(shapefile_path)
+                gdf['ORDER'] = gdf.index
+                print(f"[MGWLR DEBUG] Loaded shapefile with {len(gdf)} regions")
+                
+                merge_col = None
+                if 'Kabupaten/Kota' in df_processed.columns:
+                    merge_col = 'Kabupaten/Kota'
+                elif 'NAMOBJ' in df_processed.columns:
+                    merge_col = 'NAMOBJ'
+                else:
+                    print("Warning: No merge column found, using data as-is")
+                    df_final = df_processed
+                
+                if merge_col:
+                    print(f"[MGWLR DEBUG] Merging on column: {merge_col}")
+                    df_final = gdf.merge(df_processed, left_on="NAMOBJ", right_on=merge_col, how='inner')
+                    print(f"[MGWLR DEBUG] After merge: {len(df_final)} rows")
+                    
+                    df_final = df_final.sort_values("ORDER").reset_index(drop=True)
+                    print(f"[MGWLR DEBUG] After sort: {len(df_final)} rows")
+                    print(f"[MGWLR DEBUG] First 5 kabupaten: {df_final['Kabupaten/Kota'].head().tolist()}")
+                else:
+                    df_final = df_processed
+            else:
+                print(f"Warning: Shapefile not found at {shapefile_path}, using data as-is")
+                df_final = df_processed
+                
+        except Exception as e:
+            print(f"Warning: Could not merge with shapefile: {e}")
+            print("Using data as-is without shapefile sorting")
+            df_final = df_processed
+        
+        # Extract variables
+        X_local = df_final[X_local_cols].values  # (n, k_local)
+        Z_global = df_final[Z_global_cols].values  # (n, k_global)
+        n = len(df_final)
+        
+        print(f"[MGWLR DEBUG] Data observations: {n}, Model observations: {Beta_Local.shape[0]}")
+        
+        # Validate number of observations
+        if n != Beta_Local.shape[0]:
+            print(f"[MGWLR DEBUG] FATAL ERROR: Observation count mismatch. Data: {n}, Model: {Beta_Local.shape[0]}")
+            raise ValueError(
+                f"Number of observations ({n}) does not match model training size ({Beta_Local.shape[0]}). "
+                f"MGWLR requires the same observations in the same order as training data."
+            )
+        
+        # Check if scalers are available (try both key naming conventions)
+        scaler_X = None
+        scaler_Z = None
+        
+        # Try new naming convention first (Scaler_X_local, Scaler_Z_global)
+        if 'Scaler_X_local' in model_data and 'Scaler_Z_global' in model_data:
+            print("[MGWLR DEBUG] Using scalers from model (Scaler_X_local, Scaler_Z_global)")
+            scaler_X = model_data['Scaler_X_local']
+            scaler_Z = model_data['Scaler_Z_global']
+        # Try old naming convention (scaler_X, scaler_Z)
+        elif 'scaler_X' in model_data and 'scaler_Z' in model_data:
+            print("[MGWLR DEBUG] Using scalers from model (scaler_X, scaler_Z)")
+            scaler_X = model_data['scaler_X']
+            scaler_Z = model_data['scaler_Z']
+        
+        if scaler_X is not None and scaler_Z is not None:
+            X_local_scaled = scaler_X.transform(X_local)
+            Z_global_scaled = scaler_Z.transform(Z_global)
+        else:
+            print("[MGWLR DEBUG] WARNING: No scalers found, using raw values")
+            print("[MGWLR DEBUG] This may cause incorrect predictions!")
+            X_local_scaled = X_local
+            Z_global_scaled = Z_global
+        
+        # Calculate predictions using simpler approach
+        # eta_i = gamma[0] + Z_global[i] @ gamma[1:] + X_local[i] @ Beta_Local[i]
+        print("[MGWLR DEBUG] Calculating predictions...")
+        
+        predictions = np.zeros(n)
+        probabilities = np.zeros(n)
+        
+        
+        for i in range(n):
+            # Global component: intercept + Z_global @ gamma
+            eta_global = gamma[0] + Z_global_scaled[i] @ gamma[1:]
+            
+            # Local component: X_local @ Beta_Local[i]
+            eta_local = X_local_scaled[i] @ Beta_Local[i]
+            
+            # Total linear predictor
+            eta_i = eta_global + eta_local
+            
+            # Probability
+            prob_i = 1 / (1 + np.exp(-eta_i))
+            probabilities[i] = prob_i
+            predictions[i] = 1 if prob_i >= 0.5 else 0
+            
+            # Debug first 3 observations
+            if i < 3:
+                print(f"[MGWLR DEBUG] Obs {i} ({df_final.iloc[i]['Kabupaten/Kota'] if 'Kabupaten/Kota' in df_final.columns else i}):")
+                print(f"  gamma[0]={gamma[0]:.4f}, eta_global={eta_global:.4f}, eta_local={eta_local:.4f}")
+                print(f"  eta_total={eta_i:.4f}, prob={prob_i:.4f}, pred={predictions[i]}")
+        
+        print("[MGWLR DEBUG] Prediction complete")
+        print(f"[MGWLR DEBUG] Predictions summary: {predictions[:5]} (first 5)")
+        print(f"[MGWLR DEBUG] Probabilities summary: {probabilities[:5]} (first 5)")
+        
+        # If P1_encoded available (ground truth), check accuracy
+        if 'P1_encoded' in df_final.columns:
+            from sklearn.metrics import accuracy_score
+            y_true = df_final['P1_encoded'].values
+            acc = accuracy_score(y_true, predictions)
+            print(f"[MGWLR DEBUG] Calculated accuracy (in sorted order): {acc}")
+        
+        
+        # For MGWLR, predictions must stay in sorted ORDER
+        # DO NOT reorder to original index - data is already in correct order after shapefile sort
+        print("[MGWLR DEBUG] Returning predictions in sorted order (by ORDER column)")
+        return pd.Series(predictions, index=df_final.index), pd.Series(probabilities, index=df_final.index)
 
     def predict(self, df: pd.DataFrame, model_name: str) -> Tuple[pd.Series, pd.Series]:
         """Run prediction on data using specified model"""
@@ -266,6 +669,20 @@ class ModelService:
         
         # Prepare data based on model type
         filename = self.model_mapping.get(model_name, model_name)
+        
+        # Check if model is GWLR or MGWLR (stored as dictionary)
+        if filename in ["gwlr_model.pkl", "mgwlr_model.pkl"]:
+            if not isinstance(model, dict):
+                raise ValueError(f"Expected GWLR/MGWLR model to be a dictionary, got {type(model)}")
+            
+            # Distinguish between GWLR and MGWLR
+            if filename == "mgwlr_model.pkl":
+                print("[DEBUG] Using MGWLR prediction method")
+                return self._predict_mgwlr(model, df)
+            else:
+                print("[DEBUG] Using GWLR prediction method")
+                return self._predict_gwlr(model, df)
+
         
         if filename == "model_logistik_global.pkl":
             # Specific logic for Global Logistic Regression
@@ -279,7 +696,7 @@ class ModelService:
             X = df[feature_cols].copy()
             X = sm.add_constant(X)
         else:
-            # Default fallback for other models (GWLR/MGWLR)
+            # Default fallback for other models
             X = df.select_dtypes(include=[np.number]).dropna()
             if 'p1_encoded' in X.columns:
                  X = X.drop(columns=['p1_encoded'])
@@ -447,7 +864,7 @@ class DataService:
                 'unmatched_data_regions': list(unmatched_in_data)
              }
              
-             print(f"✓ Auto-merged data with geodata: {self.merge_stats['matched_regions']}/{self.merge_stats['total_geodata_regions']} regions matched ({self.merge_stats['match_rate']}%)")
+             print(f"[OK] Auto-merged data with geodata: {self.merge_stats['matched_regions']}/{self.merge_stats['total_geodata_regions']} regions matched ({self.merge_stats['match_rate']}%)")
 
         except Exception as e:
             print(f"Warning: Could not merge with geodata: {e}")
