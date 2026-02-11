@@ -101,14 +101,14 @@ if page == "Homepage":
         """)
     
     with col_home_2:
-        st.success("### 🔮 Langkah 2: Prediksi")
+        st.success("### 🔮 Langkah 2: Pemodelan")
         st.write("""
-        Lakukan prediksi menggunakan model Machine Learning yang telah dilatih.
+        Lakukan prediksi menggunakan model yang tersedia.
         
         **Model Tersedia:**
         - Global Logistic Regression.
         - Geographically Weighted Logistic Regression (GWLR).
-        - MGWLR Semiparametric.
+        - GWLR-Semiparametric.
         """)
 
     st.write("")
@@ -406,102 +406,102 @@ elif page == "Prediction":
                     region_col = data_service.region_column
                     
                     if region_col:
-                        choropleth_data = geo_service.create_choropleth_data(
-                            df_viz, 
-                            variable='Pred_Class_Logit',
-                            region_col=region_col
-                        )
-                        
-                        geojson = choropleth_data['geojson']
-                        
-                        # Create Map
-                        bounds = geo_service.get_geodata_info()['bounds']
-                        center_lat = (bounds[1] + bounds[3]) / 2
-                        center_lon = (bounds[0] + bounds[2]) / 2
-                        
-                        m_pred = folium.Map(
-                            location=[center_lat, center_lon],
-                            zoom_start=8,
-                            tiles='OpenStreetMap'
-                        )
-                        
-                        # Color scale for Binary (0 vs 1)
-                        # 0 = Low Risk/Negative (e.g., Blue/Green), 1 = High Risk/Positive (e.g., Red/Orange)
-                        colormap = LinearColormap(
-                            colors=['#2c7bb6', '#d7191c'], # Blue to Red
-                            vmin=0,
-                            vmax=1,
-                            caption='Pred_Class_Logit (0 vs 1)'
-                        )
-                        
-                        folium.GeoJson(
-                            geojson,
-                            style_function=lambda feature: {
-                                'fillColor': colormap(feature['properties']['Pred_Class_Logit']) 
-                                    if feature['properties'].get('Pred_Class_Logit') is not None else '#cccccc',
-                                'color': 'white',
-                                'weight': 1,
-                                'fillOpacity': 0.7
-                            },
-                            tooltip=folium.GeoJsonTooltip(
-                                fields=['NAMOBJ', 'Pred_Class_Logit'],
-                                aliases=['Wilayah:', 'Kelas Prediksi:'],
-                                localize=True
+                        with st.spinner("Membuat Peta Prediksi..."):
+                            choropleth_data = geo_service.create_choropleth_data(
+                                df_viz, 
+                                variable='Pred_Class_Logit',
+                                region_col=region_col
                             )
-                        ).add_to(m_pred)
-                        
-                        colormap.add_to(m_pred)
-                        m_pred.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
-                        
-                        components.html(m_pred._repr_html_(), height=500)
+                            
+                            geojson = choropleth_data['geojson']
+                            
+                            # Create Map
+                            bounds = geo_service.get_geodata_info()['bounds']
+                            center_lat = (bounds[1] + bounds[3]) / 2
+                            center_lon = (bounds[0] + bounds[2]) / 2
+                            
+                            m_pred = folium.Map(
+                                location=[center_lat, center_lon],
+                                zoom_start=8,
+                                tiles='OpenStreetMap'
+                            )
+                            
+                            # Color scale for Binary (0 vs 1)
+                            # 0 = Low Risk/Negative (e.g., Blue/Green), 1 = High Risk/Positive (e.g., Red/Orange)
+                            colormap = LinearColormap(
+                                colors=['#2c7bb6', '#d7191c'], # Blue to Red
+                                vmin=0,
+                                vmax=1,
+                                caption='Pred_Class_Logit (0 vs 1)'
+                            )
+                            
+                            folium.GeoJson(
+                                geojson,
+                                style_function=lambda feature: {
+                                    'fillColor': colormap(feature['properties']['Pred_Class_Logit']) 
+                                        if feature['properties'].get('Pred_Class_Logit') is not None else '#cccccc',
+                                    'color': 'white',
+                                    'weight': 1,
+                                    'fillOpacity': 0.7
+                                },
+                                tooltip=folium.GeoJsonTooltip(
+                                    fields=['NAMOBJ', 'Pred_Class_Logit'],
+                                    aliases=['Wilayah:', 'Kelas Prediksi:'],
+                                    localize=True
+                                )
+                            ).add_to(m_pred)
+                            
+                            colormap.add_to(m_pred)
+                            m_pred.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
+                            
+                            components.html(m_pred._repr_html_(), height=500)
                         
                         # --- Second Map: Pred_Prob_Logit (Probability) ---
-                        st.write("")
-                        st.write("")
-                        st.write("")
+                        st.write("") 
                         st.markdown("### 🗺️ Peta Sebaran Probabilitas")
                         
-                        df_viz['Pred_Prob_Logit'] = probs
-                        choropleth_data_prob = geo_service.create_choropleth_data(
-                            df_viz, 
-                            variable='Pred_Prob_Logit',
-                            region_col=region_col
-                        )
-                        geojson_prob = choropleth_data_prob['geojson']
-                        
-                        m_prob = folium.Map(
-                            location=[center_lat, center_lon],
-                            zoom_start=8,
-                            tiles='OpenStreetMap'
-                        )
-                        
-                        # Color scale for Probability (0 to 1) - Gradient
-                        colormap_prob = LinearColormap(
-                            colors=['#ffffcc', '#a1dab4', '#41b6c4', '#2c7fb8', '#253494'],
-                            vmin=0,
-                            vmax=1,
-                            caption='Pred_Prob_Logit (Probabilitas)'
-                        )
-                        
-                        folium.GeoJson(
-                            geojson_prob,
-                            style_function=lambda feature: {
-                                'fillColor': colormap_prob(feature['properties']['Pred_Prob_Logit']) 
-                                    if feature['properties'].get('Pred_Prob_Logit') is not None else '#cccccc',
-                                'color': 'white',
-                                'weight': 1,
-                                'fillOpacity': 0.7
-                            },
-                            tooltip=folium.GeoJsonTooltip(
-                                fields=['NAMOBJ', 'Pred_Prob_Logit'],
-                                aliases=['Wilayah:', 'Probabilitas:'],
-                                localize=True
+                        with st.spinner("Membuat Peta Probabilitas..."):
+                            df_viz['Pred_Prob_Logit'] = probs
+                            choropleth_data_prob = geo_service.create_choropleth_data(
+                                df_viz, 
+                                variable='Pred_Prob_Logit',
+                                region_col=region_col
                             )
-                        ).add_to(m_prob)
-                        
-                        colormap_prob.add_to(m_prob)
-                        m_prob.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
-                        components.html(m_prob._repr_html_(), height=500)
+                            geojson_prob = choropleth_data_prob['geojson']
+                            
+                            m_prob = folium.Map(
+                                location=[center_lat, center_lon],
+                                zoom_start=8,
+                                tiles='OpenStreetMap'
+                            )
+                            
+                            # Color scale for Probability (0 to 1) - Gradient
+                            colormap_prob = LinearColormap(
+                                colors=['#ffffcc', '#a1dab4', '#41b6c4', '#2c7fb8', '#253494'],
+                                vmin=0,
+                                vmax=1,
+                                caption='Pred_Prob_Logit (Probabilitas)'
+                            )
+                            
+                            folium.GeoJson(
+                                geojson_prob,
+                                style_function=lambda feature: {
+                                    'fillColor': colormap_prob(feature['properties']['Pred_Prob_Logit']) 
+                                        if feature['properties'].get('Pred_Prob_Logit') is not None else '#cccccc',
+                                    'color': 'white',
+                                    'weight': 1,
+                                    'fillOpacity': 0.7
+                                },
+                                tooltip=folium.GeoJsonTooltip(
+                                    fields=['NAMOBJ', 'Pred_Prob_Logit'],
+                                    aliases=['Wilayah:', 'Probabilitas:'],
+                                    localize=True
+                                )
+                            ).add_to(m_prob)
+                            
+                            colormap_prob.add_to(m_prob)
+                            m_prob.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
+                            components.html(m_prob._repr_html_(), height=500)
                         
                     else:
                         st.warning("Tidak dapat mendeteksi kolom wilayah untuk peta.")
@@ -561,12 +561,25 @@ elif page == "Prediction":
                     'Pred Class Logit': preds
                 })
                 
-                # Add region column if available in original df
-                if data_service.region_column and data_service.region_column in df.columns:
-                    result_df.insert(0, 'Kabupaten/Kota', df[data_service.region_column])
+                # Add region column if available
+                detected_region_col = data_service.region_column
+                
+                # If not set in service, try to auto-detect
+                if not detected_region_col:
+                    candidates = ['kabupaten_kota', 'Kabupaten/Kota', 'region', 'wilayah', 'daerah', 'nama_kabupaten', 'nama_kota', 'kabkot']
+                    for col in df.columns:
+                        if any(c == col.lower() for c in candidates):
+                            detected_region_col = col
+                            break
+                            
+                if detected_region_col and detected_region_col in df.columns:
+                    result_df.insert(0, 'Kabupaten/Kota', df[detected_region_col])
                 else:
-                    # If index is meaningful, use it
-                    result_df.insert(0, 'Index', df.index)
+                    # If index looks like region names (strings), use it
+                    if df.index.dtype == 'object' or df.index.dtype == 'string':
+                        result_df.insert(0, 'Kabupaten/Kota', df.index)
+                    else:
+                        result_df.insert(0, 'Index', df.index)
                 
                 # Format formatting for display
                 # Note: st.dataframe allows formatting but here we just round for simplicity
@@ -575,6 +588,144 @@ elif page == "Prediction":
                     result_df, 
                     use_container_width=True,
                     height=500
+                )
+            
+            st.divider()
+            
+            # === RECOMMENDATIONS (Integrated) ===
+            # Full width section below the columns
+            with st.container():
+                st.markdown("### 💡 Rekomendasi Kebijakan")
+                
+                # Create standardized dataframe for recommendations using result_df
+                # result_df has Region (Kabupaten/Kota) as first column
+                rec_df = pd.DataFrame()
+                rec_column = result_df.columns[0]
+                rec_df['Region'] = result_df[rec_column]
+                rec_df['Class'] = result_df['Pred Class Logit']
+                
+                total_regions = len(rec_df)
+                class_1_count = (rec_df['Class'] == 1).sum()
+                class_0_count = (rec_df['Class'] == 0).sum()
+                class_1_pct = (class_1_count / total_regions) * 100 if total_regions > 0 else 0
+                
+                # Display Metrics
+                col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
+                
+                with col_stat1:
+                    st.metric("Total Wilayah", total_regions)
+
+                
+                
+                with col_stat2:
+                    st.metric("Kelas 1 (Tinggi)", class_1_count, delta=f"{class_1_pct:.1f}%", delta_color="inverse")
+                
+                with col_stat3:
+                    st.metric("Kelas 0 (Rendah)", class_0_count, delta=f"{100-class_1_pct:.1f}%" if total_regions > 0 else "0%", delta_color="normal")
+                
+                with col_stat4:
+                    if class_1_count > class_0_count:
+                        st.metric("Status", "Perlu Perhatian", delta="Mayoritas Tinggi", delta_color="inverse")
+                    else:
+                        st.metric("Status", "Cukup Baik", delta="Mayoritas Rendah", delta_color="normal")
+                
+                st.write("")
+                
+                # Get regions lists
+                class_1_regions = rec_df[rec_df['Class'] == 1]['Region'].tolist()
+                class_0_regions = rec_df[rec_df['Class'] == 0]['Region'].tolist()
+                
+                # === CLASS 1 RECOMMENDATIONS ===
+                with st.expander(f"🚨 **Daerah Prioritas Tinggi** ({class_1_count})", expanded=True):
+                    if class_1_count > 0:
+                        st.markdown("**Daftar Daerah:**")
+                        cols_regions = st.columns(5)
+                        for idx, region in enumerate(class_1_regions):
+                            with cols_regions[idx % 5]:
+                                st.markdown(f"• {region}")
+                        
+                        st.markdown("---")
+                        st.markdown("#### 🎯 Rekomendasi Intervensi")
+                        st.markdown("""
+                        **1. Bantuan Sosial Intensif**
+                        - Tingkatkan cakupan bansos dan validasi data penerima.
+                        - Prioritaskan keluarga rentan dengan dependency ratio tinggi.
+                        
+                        **2. Akses Layanan Dasar**
+                        - Perbaiki infrastruktur rumah tidak layak huni (RTLH).
+                        - Tingkatkan akses sanitasi dan air bersih.
+                        
+                        **3. Ekonomi Lokal**
+                        - Pelatihan kerja berbasis kompetensi lokal.
+                        - Fasilitasi akses modal dan pasar untuk UMKM.
+                        """)
+                    else:
+                        st.success("✅ Tidak ada!")
+                
+                # === CLASS 0 RECOMMENDATIONS ===
+                with st.expander(f"✅ **Daerah Status Baik** ({class_0_count})", expanded=True):
+                    if class_0_count > 0:
+                        st.markdown("**Daftar Daerah:**")
+                        cols_regions = st.columns(5)
+                        for idx, region in enumerate(class_0_regions):
+                            with cols_regions[idx % 5]:
+                                st.markdown(f"• {region}")
+                        
+                        st.markdown("---")
+                        st.markdown("#### 🎯 Rekomendasi Pemeliharaan")
+                        st.markdown("""
+                        **1. Pertahankan Program**
+                        - Lanjutkan program efektif dan dokumentasikan praktik baik.
+                        
+                        **2. Pencegahan**
+                        - Monitor indikator dini untuk mencegah penurunan status.
+                        - Siapkan jaring pengaman sosial adaptif.
+                        
+                        **3. Peningkatan**
+                        - Tingkatkan kualitas layanan publik digital.
+                        - Dorong inovasi dan investasi hijau.
+                        """)
+                    else:
+                        st.warning("⚠️ Perlu perhatian!")
+
+                # === GENERAL RECOMMENDATIONS ===
+                with st.expander("📋 **Rekomendasi Umum**", expanded=True):
+                     st.markdown("""
+                     #### 🔄 Monitoring & Evaluasi
+                     **1. Update Data Berkala**: Lakukan pengumpulan data minimal 6 bulan sekali.
+                     **2. Evaluasi Program**: Ukur dampak program terhadap indikator kemiskinan secara rutin.
+                     **3. Kolaborasi**: Sinergi program antara pemerintah provinsi, kabupaten, dan desa.
+                     **4. Analisis Spasial**: Manfaatkan peta kerawanan untuk targeting program yang lebih presisi.
+                     """)
+
+                # === DOWNLOAD REPORT ===
+                st.write("")
+                st.markdown("### 📥 Unduh Laporan")
+                
+                rec_report = f"""
+LAPORAN REKOMENDASI KEBIJAKAN
+Model: {selected_model}
+Tanggal: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')}
+
+RINGKASAN:
+Total Wilayah: {total_regions}
+Prioritas Tinggi (Kelas 1): {class_1_count} ({class_1_pct:.1f}%)
+Status Baik (Kelas 0): {class_0_count} ({100-class_1_pct:.1f}%)
+
+DAERAH PRIORITAS TINGGI:
+{chr(10).join(f"- {r}" for r in class_1_regions) if class_1_regions else "Tidak ada"}
+
+DAERAH STATUS BAIK:
+{chr(10).join(f"- {r}" for r in class_0_regions) if class_0_regions else "Tidak ada"}
+
+REKOMENDASI:
+Lihat aplikasi untuk detail rekomendasi kebijakan.
+"""
+                st.download_button(
+                    label="📄 Download Laporan (TXT)",
+                    data=rec_report,
+                    file_name=f"rekomendasi_kebijakan_{pd.Timestamp.now().strftime('%Y%m%d')}.txt",
+                    mime="text/plain"
                 )
 
 # Footer

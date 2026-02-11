@@ -2,16 +2,18 @@
 Unified Service Module
 Contains: GeoService, ModelService, DataService, StatsService
 """
-import json
 import pickle
+import json
 import pandas as pd
 import numpy as np
 import geopandas as gpd
 import statsmodels.api as sm
+import streamlit as st
 from typing import Dict, Any, List, Optional, Tuple
 from pathlib import Path
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
 from sklearn.preprocessing import StandardScaler
+from scipy.spatial.distance import cdist
 
 # Unified Imports
 from backend.settings import (
@@ -31,8 +33,108 @@ from backend.utils import (
 # ==========================================
 # GEO SERVICE
 # ==========================================
+# Cached function for loading shapefile
+@st.cache_resource
+def _load_shapefile_cached(shapefile_path: str) -> gpd.GeoDataFrame:
+    """Load shapefile with caching for performance"""
+    if not Path(shapefile_path).exists():
+        raise FileNotFoundError(
+            f"Shapefile not found: {shapefile_path}\n"
+            "Please ensure 'Geodata Jawa Tengah' folder exists in project root."
+        )
+    
+    try:
+        # Load shapefile using geopandas
+        gdf = gpd.read_file(shapefile_path)
+        
+        # Ensure it's in WGS84 (EPSG:4326) for web mapping
+        if gdf.crs is not None and gdf.crs.to_epsg() != 4326:
+            gdf = gdf.to_crs(epsg=4326)
+        
+        print(f"[OK] Loaded {len(gdf)} regions from Jawa Tengah shapefile (cached)")
+        return gdf
+        
+    except Exception as e:
+        raise RuntimeError(f"Error loading shapefile: {e}")
+
+
+# Cached function for creating choropleth data
+@st.cache_data
+def _create_choropleth_data_cached(
+    df: pd.DataFrame, 
+    variable: str, 
+    region_col: str,
+    geojson_data: Dict[str, Any],
+    region_mapping: Dict[str, int]
+) -> Dict[str, Any]:
+    """
+    Create choropleth map data with caching
+    
+    Args:
+        df: DataFrame with data
+        variable: Column to visualize
+        region_col: Column containing region names
+        geojson_data: GeoJSON dictionary
+        region_mapping: Dictionary mapping region names to feature indices
+        
+    Returns:
+        Dict with updated GeoJSON and stats
+    """
+    # Create matching dataframe
+    match_df = pd.DataFrame({
+        'region': df[region_col],
+        'value': df[variable],
+        'region_normalized': df[region_col].apply(normalize_region_name)
+    }).dropna(subset=['value'])
+    
+    # Match regions logic
+    matched_values = {}
+    unmatched_regions = []
+    
+    for _, row in match_df.iterrows():
+        region_norm = row['region_normalized']
+        region_orig = row['region']
+        value = row['value']
+        
+        # Try to find matching GeoJSON feature
+        feature_idx = None
+        
+        # Try exact normalized match first
+        if region_norm in region_mapping:
+            feature_idx = region_mapping[region_norm]
+        # Try original name lowercase
+        elif region_orig.lower().strip() in region_mapping:
+            feature_idx = region_mapping[region_orig.lower().strip()]
+        else:
+            # Try fuzzy matching (contains check)
+            for geo_region, idx in region_mapping.items():
+                if region_norm in geo_region or geo_region in region_norm:
+                    feature_idx = idx
+                    break
+        
+        if feature_idx is not None:
+            matched_values[feature_idx] = value
+        else:
+            unmatched_regions.append(region_orig)
+            
+    # Add values to GeoJSON features
+    geojson_with_values = json.loads(json.dumps(geojson_data))  # Deep copy
+    for feature_idx, value in matched_values.items():
+        if feature_idx < len(geojson_with_values['features']):
+            geojson_with_values['features'][feature_idx]['properties'][variable] = value
+    
+    return {
+        "geojson": geojson_with_values,
+        "values": matched_values,
+        "variable": variable,
+        "matched_count": len(matched_values),
+        "total_regions": len(geojson_data['features']),
+        "unmatched_regions": unmatched_regions,
+        "match_rate": round(len(matched_values) / len(geojson_data['features']) * 100, 2)
+    }
+
 class GeoService:
-    """Service for GeoJSON operations with Jawa Tengah geodata"""
+    """Service for handling geospatial operations"""
     
     def __init__(self):
         self.geodataframe: Optional[gpd.GeoDataFrame] = None
@@ -40,30 +142,12 @@ class GeoService:
         self.region_mapping: Dict[str, str] = {}
     
     def load_shapefile(self) -> gpd.GeoDataFrame:
-        """Load Jawa Tengah shapefile"""
-        if self.geodataframe is not None:
-            return self.geodataframe
+        """Load Jawa Tengah shapefile (with caching)"""
+        if self.geodataframe is None:
+            # Use cached loader
+            self.geodataframe = _load_shapefile_cached(str(JAWA_TENGAH_SHAPEFILE))
         
-        if not JAWA_TENGAH_SHAPEFILE.exists():
-            raise FileNotFoundError(
-                f"Shapefile not found: {JAWA_TENGAH_SHAPEFILE}\n"
-                "Please ensure 'Geodata Jawa Tengah' folder exists in project root."
-            )
-        
-        try:
-            # Load shapefile using geopandas
-            self.geodataframe = gpd.read_file(JAWA_TENGAH_SHAPEFILE)
-            
-            # Ensure it's in WGS84 (EPSG:4326) for web mapping
-            if self.geodataframe.crs is not None and self.geodataframe.crs.to_epsg() != 4326:
-                self.geodataframe = self.geodataframe.to_crs(epsg=4326)
-            
-            print(f"[OK] Loaded {len(self.geodataframe)} regions from Jawa Tengah shapefile")
-            
-            return self.geodataframe
-            
-        except Exception as e:
-            raise RuntimeError(f"Error loading shapefile: {e}")
+        return self.geodataframe
     
     def load_geojson(self) -> Dict[str, Any]:
         """Load or convert shapefile to GeoJSON"""
@@ -166,7 +250,7 @@ class GeoService:
         variable: str,
         region_col: str = None
     ) -> Dict[str, Any]:
-        """Create choropleth map data"""
+        """Create choropleth map data (uses cached helper)"""
         # Load GeoJSON
         geojson = self.load_geojson()
         
@@ -182,31 +266,14 @@ class GeoService:
             if region_col is None:
                 raise ValueError("Could not find region column in DataFrame")
         
-        # Create matching dataframe
-        match_df = pd.DataFrame({
-            'region': df[region_col],
-            'value': df[variable],
-            'region_normalized': df[region_col].apply(normalize_region_name)
-        }).dropna(subset=['value'])
-        
-        # Match regions
-        matched_values, unmatched = self.match_regions(match_df)
-        
-        # Add values to GeoJSON features
-        geojson_with_values = json.loads(json.dumps(geojson))  # Deep copy
-        for feature_idx, value in matched_values.items():
-            if feature_idx < len(geojson_with_values['features']):
-                geojson_with_values['features'][feature_idx]['properties'][variable] = value
-        
-        return {
-            "geojson": geojson_with_values,
-            "values": matched_values,
-            "variable": variable,
-            "matched_count": len(matched_values),
-            "total_regions": len(geojson['features']),
-            "unmatched_regions": unmatched,
-            "match_rate": round(len(matched_values) / len(geojson['features']) * 100, 2)
-        }
+        # Call cached helper
+        return _create_choropleth_data_cached(
+            df, 
+            variable, 
+            region_col, 
+            self.geojson_data,
+            self.region_mapping
+        )
     
     def get_geodata_info(self) -> Dict[str, Any]:
         """Get information about loaded geodata"""
@@ -224,8 +291,22 @@ class GeoService:
 # ==========================================
 # MODEL SERVICE
 # ==========================================
+
+# Cached function for loading models
+@st.cache_resource
+def _load_model_cached(model_path: str) -> Any:
+    """Load model from pickle with caching for performance"""
+    try:
+        with open(model_path, 'rb') as f:
+            model = pickle.load(f)
+            print(f"[OK] Loaded model: {Path(model_path).name} (cached)")
+            return model
+    except Exception as e:
+        raise RuntimeError(f"Error loading model {Path(model_path).name}: {e}")
+
+
 class ModelService:
-    """Service for handling ML models and predictions"""
+    """Service for model loading and prediction"""
     
     def __init__(self):
         self.models: Dict[str, Any] = {}
@@ -236,30 +317,21 @@ class ModelService:
             "Model Geographically Weighted Logistic Regression Semiparametric": "mgwlr_model.pkl"
         }
     
-    def get_available_models(self) -> List[str]:
-        """Get list of available model display names"""
-        return list(self.model_mapping.keys())
-    
     def load_model(self, model_identifier: str) -> Any:
-        """Load a model from disk"""
+        """Load a model from disk (with caching)"""
         # Resolve filename if display name is passed
         filename = self.model_mapping.get(model_identifier, model_identifier)
         
-        if filename in self.models:
-            return self.models[filename]
-            
         model_path = MODEL_DIR / filename
         if not model_path.exists():
             raise FileNotFoundError(f"Model not found: {model_path}")
-            
-        try:
-            with open(model_path, 'rb') as f:
-                model = pickle.load(f)
-                self.models[filename] = model
-                print(f"[OK] Loaded model: {filename}")
-                return model
-        except Exception as e:
-            raise RuntimeError(f"Error loading model {filename}: {e}")
+        
+        # Use cached loader
+        return _load_model_cached(str(model_path))
+    
+    def get_available_models(self) -> List[str]:
+        """Get list of available model display names"""
+        return list(self.model_mapping.keys())
     
     def _predict_gwlr(self, model_data: Dict, df: pd.DataFrame) -> Tuple[pd.Series, pd.Series]:
         """
@@ -658,10 +730,30 @@ class ModelService:
             print(f"[MGWLR DEBUG] Calculated accuracy (in sorted order): {acc}")
         
         
-        # For MGWLR, predictions must stay in sorted ORDER
-        # DO NOT reorder to original index - data is already in correct order after shapefile sort
-        print("[MGWLR DEBUG] Returning predictions in sorted order (by ORDER column)")
-        return pd.Series(predictions, index=df_final.index), pd.Series(probabilities, index=df_final.index)
+        # CRITICAL: Reorder predictions to match original dataframe index
+        # Currently predictions correspond to df_final rows (sorted by ORDER for MGWLR)
+        # We need to map them back to df.index using _original_index so they align with the frontend df
+        if '_original_index' in df_final.columns:
+            print("[MGWLR DEBUG] Reordering predictions to match original index")
+            
+            # Create series with original index as the index
+            pred_series = pd.Series(predictions, index=df_final['_original_index'])
+            prob_series = pd.Series(probabilities, index=df_final['_original_index'])
+            
+            # Remove duplicates in index if any (shouldn't happen if 1-to-1)
+            if pred_series.index.duplicated().any():
+                 print("[MGWLR DEBUG] Warning: Duplicate indices found during reordering")
+                 pred_series = pred_series[~pred_series.index.duplicated(keep='first')]
+                 prob_series = prob_series[~prob_series.index.duplicated(keep='first')]
+            
+            # Sort by index to match df.index order
+            pred_series = pred_series.reindex(df.index)
+            prob_series = prob_series.reindex(df.index)
+            
+            return pred_series, prob_series
+        else:
+            print("[MGWLR DEBUG] Warning: Original index lost, returning as-is (may be scrambled)")
+            return pd.Series(predictions, index=df_final.index), pd.Series(probabilities, index=df_final.index)
 
     def predict(self, df: pd.DataFrame, model_name: str) -> Tuple[pd.Series, pd.Series]:
         """Run prediction on data using specified model"""
