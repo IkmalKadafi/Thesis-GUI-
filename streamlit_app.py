@@ -389,32 +389,7 @@ elif page == "Prediction":
 **3. Kolaborasi**: Sinergi program antara pemerintah provinsi, kabupaten, dan desa.
 **4. Analisis Spasial**: Manfaatkan peta kerawanan untuk targeting program yang lebih presisi.""")
 
-                st.write("")
-                st.markdown("### 📥 Unduh Laporan")
-                rec_report = f"""LAPORAN REKOMENDASI KEBIJAKAN
-Model: {selected_model}
-Tanggal: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')}
 
-RINGKASAN:
-Total Wilayah: {total_regions}
-Prioritas Tinggi (Kelas 1): {class_1_count} ({class_1_pct:.1f}%)
-Status Baik (Kelas 0): {class_0_count} ({100 - class_1_pct:.1f}%)
-
-DAERAH PRIORITAS TINGGI:
-{chr(10).join(f"- {r}" for r in class_1_regions) if class_1_regions else "Tidak ada"}
-
-DAERAH STATUS BAIK:
-{chr(10).join(f"- {r}" for r in class_0_regions) if class_0_regions else "Tidak ada"}
-
-REKOMENDASI:
-Lihat aplikasi untuk detail rekomendasi kebijakan.
-"""
-                st.download_button(
-                    label="📄 Download Laporan (TXT)",
-                    data=rec_report,
-                    file_name=f"rekomendasi_kebijakan_{pd.Timestamp.now().strftime('%Y%m%d')}.txt",
-                    mime="text/plain",
-                )
 
 st.divider()
 st.caption("© 2026 Sistem Analitik Data | Poverty Depth Index Spatial Analysis")
