@@ -64,7 +64,7 @@ if page == "Homepage":
     with col2:
         st.success("### Langkah 2: Pemodelan")
         st.write("""
-        Lakukan prediksi menggunakan model yang tersedia.
+        Lakukan pemodelan menggunakan model yang tersedia.
 
         **Model Tersedia:**
         - Global Logistic Regression.
@@ -206,7 +206,7 @@ elif page == "Import & Exploration":
 # ── PAGE: PREDICTION ──────────────────────────────────────────────────────────
 
 elif page == "Prediction":
-    st.title("Prediksi Model")
+    st.title("Pemodelan")
 
     if 'data' not in st.session_state:
         st.warning("⚠️ Silakan import data terlebih dahulu di halaman 'Import & Exploration'.")
@@ -221,20 +221,55 @@ elif page == "Prediction":
             run_button = st.button("🚀 Run Prediction", type="primary", use_container_width=True)
 
         if run_button:
-            with st.spinner(f"Menjalankan prediksi dengan {selected_model}..."):
+            with st.spinner(f"Menjalankan dengan {selected_model}..."):
                 try:
                     predictions, probabilities = model_service.predict(df, selected_model)
                     st.session_state.update({'predictions': predictions, 'probabilities': probabilities, 'last_model': selected_model})
-                    st.success("✅ Prediksi selesai!")
+                    st.success("✅ Pemodelan selesai!")
                 except Exception as e:
-                    st.error(f"❌ Terjadi kesalahan saat prediksi: {e}")
+                    st.error(f"❌ Terjadi kesalahan saat pemodelan: {e}")
 
         if 'predictions' in st.session_state:
             preds = st.session_state['predictions']
             probs = st.session_state['probabilities']
 
-            st.subheader("📊 Hasil Prediksi")
+            st.subheader("📊 Hasil Pemodelan")
             st.info(f"Rata-rata Probabilitas: {probs.mean():.4f}")
+
+            # ── Parameter Estimation Table ────────────────────────────────
+            st.markdown("#### 📋 Tabel Pendugaan Parameter Model")
+
+            filename = model_service.model_mapping.get(selected_model, selected_model)
+            is_gwlr = filename == "gwlr_model.pkl"
+            is_mgwlr = filename == "mgwlr_model.pkl"
+
+            selected_region = None
+            if is_gwlr or is_mgwlr:
+                regions = model_service.get_region_order()
+                if regions:
+                    selected_region = st.selectbox(
+                        "Pilih Kabupaten/Kota:",
+                        options=regions,
+                        key='param_region_select',
+                    )
+                    if is_mgwlr:
+                        st.caption("ℹ️ Variabel global (Intercept, UMK, Industri, TPT) tidak berubah antar wilayah. Variabel lokal (DepRatio, RumahLayak, Sanitasi) mengikuti wilayah yang dipilih.")
+                    else:
+                        st.caption("ℹ️ Semua koefisien bersifat lokal dan mengikuti wilayah yang dipilih.")
+
+            try:
+                param_df = model_service.get_param_table(selected_model, region_name=selected_region)
+                param_df_display = param_df.copy()
+                for col in ['Koefisien', 'Standard Error', 'p-value']:
+                    if col in param_df_display.columns:
+                        param_df_display[col] = param_df_display[col].apply(
+                            lambda x: f"{x:.6f}" if x is not None and not (isinstance(x, float) and x != x) else "—"
+                        )
+                st.dataframe(param_df_display, hide_index=True, use_container_width=True)
+            except Exception as e:
+                st.error(f"Gagal memuat tabel parameter: {e}")
+
+            st.divider()
 
             col_map, col_metrics = st.columns([2, 1])
 

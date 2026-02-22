@@ -278,7 +278,12 @@ class ModelService:
             missing = [c for c in feature_cols if c not in df.columns]
             if missing:
                 raise ValueError(f"Missing columns: {', '.join(missing)}")
-            X = sm.add_constant(df[feature_cols].copy())
+            X_raw = df[feature_cols].copy()
+            glr_model = model['model_log'] if isinstance(model, dict) else model
+            glr_scaler = model['scaler'] if isinstance(model, dict) else StandardScaler().fit(X_raw)
+            X_scaled = pd.DataFrame(glr_scaler.transform(X_raw), columns=feature_cols, index=X_raw.index)
+            X = sm.add_constant(X_scaled)
+            model = glr_model
         else:
             X = df.select_dtypes(include=[np.number]).dropna()
             if 'p1_encoded' in X.columns:
@@ -311,6 +316,119 @@ class ModelService:
             "Recall": recall_score(y_true, y_pred),
             "F1-Score": f1_score(y_true, y_pred),
         }
+
+    def get_region_order(self) -> List[str]:
+        """Return region names in shapefile ORDER (matches GWLR/MGWLR row order)."""
+        shapefile_path = Path(__file__).parent.parent / "Geodata Jawa Tengah" / "JawaTengah.shp"
+        if not shapefile_path.exists():
+            return []
+        gdf = gpd.read_file(shapefile_path)
+        return gdf['NAMOBJ'].tolist()
+
+    def get_param_table(self, model_name: str, region_name: str = None) -> pd.DataFrame:
+        """
+        Return parameter estimation table as DataFrame.
+        Columns: Variabel, Koefisien, Standard Error, p-value
+
+        For GWLR/MGWLR, region_name selects the local row.
+        For MGWLR, global vars are fixed; local vars vary by region.
+        """
+        from scipy import stats as scipy_stats
+
+        model = self.load_model(model_name)
+        filename = self.model_mapping.get(model_name, model_name)
+
+        # ── Global Logistic Regression ──────────────────────────────────────
+        if filename == "model_logistik_global.pkl":
+            glr = model['model_log'] if isinstance(model, dict) else model
+            rows = []
+            for var in glr.params.index:
+                label = 'Intercept' if var == 'const' else var
+                rows.append({
+                    'Variabel': label,
+                    'Koefisien': glr.params[var],
+                    'Standard Error': glr.bse[var],
+                    'p-value': glr.pvalues[var],
+                })
+            return pd.DataFrame(rows)
+
+        # ── GWLR ────────────────────────────────────────────────────────────
+        if filename == "gwlr_model.pkl":
+            params = model['params']          # (n_regions, n_vars+1)
+            predictor_cols = model['predictor']  # 6 vars (no intercept)
+            var_names = ['Intercept'] + predictor_cols
+            se_arr = model.get('standard_error')  # (n_regions, 7) or None
+            pv_arr = model.get('p-value')          # (n_regions, 7) or None
+            regions = self.get_region_order()
+
+            row_idx = 0
+            if region_name and region_name in regions:
+                row_idx = regions.index(region_name)
+
+            coefs = params[row_idx]
+            ses = se_arr[row_idx] if se_arr is not None else [None] * len(var_names)
+            pvs = pv_arr[row_idx] if pv_arr is not None else [None] * len(var_names)
+
+            rows = []
+            for j, var in enumerate(var_names):
+                rows.append({
+                    'Variabel': var,
+                    'Koefisien': coefs[j],
+                    'Standard Error': ses[j],
+                    'p-value': pvs[j],
+                })
+            return pd.DataFrame(rows)
+
+
+        # ── MGWLR ───────────────────────────────────────────────────────────
+        if filename == "mgwlr_model.pkl":
+            X_local_cols = model.get('X_local', ['DepRatio', 'RumahLayak', 'Sanitasi'])
+            Z_global_cols = model.get('Z_global', ['UMK', 'Industri', 'TPT'])
+            Beta_Local = model['Beta_Local']   # (n, k_local)
+            SE_Local = model['SE_Local']       # (n, k_local)
+            t_Local = model['t_Local']         # (n, k_local)
+            res_global = model['res_global']
+            gamma = res_global.params          # (4,): intercept + 3 global
+            bse_g = res_global.bse
+            pv_g = res_global.pvalues
+
+            regions = self.get_region_order()
+            row_idx = 0
+            if region_name and region_name in regions:
+                row_idx = regions.index(region_name)
+
+            rows = []
+
+            # Global vars (fixed): Intercept, then Z_global
+            global_var_names = ['Intercept'] + Z_global_cols
+            for j, var in enumerate(global_var_names):
+                rows.append({
+                    'Variabel': var,
+                    'Koefisien': gamma[j],
+                    'Standard Error': bse_g[j],
+                    'p-value': pv_g[j],
+                })
+
+            # Local vars (vary by region): X_local
+            for j, var in enumerate(X_local_cols):
+                coef = Beta_Local[row_idx, j]
+                se = SE_Local[row_idx, j]
+                t_val = t_Local[row_idx, j]
+                # Compute two-tailed p-value from t-statistic (df = n - k)
+                n_obs = Beta_Local.shape[0]
+                k_total = len(X_local_cols) + len(Z_global_cols) + 1
+                df = max(n_obs - k_total, 1)
+                pval = float(2 * scipy_stats.t.sf(abs(t_val), df=df))
+                rows.append({
+                    'Variabel': var + ' (lokal)',
+                    'Koefisien': coef,
+                    'Standard Error': se,
+                    'p-value': pval,
+                })
+
+            return pd.DataFrame(rows)
+
+        raise ValueError(f"Unknown model: {model_name}")
 
 
 # ── DataService ───────────────────────────────────────────────────────────────
