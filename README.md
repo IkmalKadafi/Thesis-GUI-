@@ -23,7 +23,7 @@ Aplikasi web berbasis Streamlit untuk eksplorasi dan visualisasi data regional J
 
 ## 💻 Persyaratan Sistem
 
-- **Python**: 3.8 atau lebih baru
+- **Python**: 3.9 atau lebih baru
 - **OS**: Windows, macOS, atau Linux
 - **RAM**: Minimal 4GB
 - **Storage**: Minimal 500MB untuk dependencies
@@ -33,7 +33,7 @@ Aplikasi web berbasis Streamlit untuk eksplorasi dan visualisasi data regional J
 ### 1. Clone atau Download Project
 
 ```bash
-cd "d:\Kadafi workspace\Entropiata Agency\GUI Skripsi\Thesis-GUI-"
+cd "d:\(folder_clone)\Spatial-Poverty-Depth-System"
 ```
 
 ### 2. Install Dependencies
